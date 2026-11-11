@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function tripDoc(id) { return get(/databases/$(database)/documents/trips/$(id)).data; }
+    function owner(t) { return signedIn() && t.ownerId == request.auth.uid; }
+    function member(t) { return signedIn() && (owner(t) || request.auth.uid in t.editors || request.auth.uid in t.viewers); }
+    function editor(t) { return owner(t) || (signedIn() && request.auth.uid in t.editors); }
+    function validData(d, id) {
+      return d is map && d.keys().hasAll(['id','name','destination','start','end','currency','budget','timezone','people','me','defaultPayer','activities','plans','expenses','settlements','tasks','archived','sample'])
+        && d.keys().hasOnly(['id','name','destination','start','end','currency','budget','timezone','people','me','defaultPayer','activities','plans','expenses','settlements','tasks','archived','sample'])
+        && d.id == id && d.name is string && d.name.size() > 0 && d.name.size() <= 120
+        && d.destination is string && d.destination.size() <= 200 && d.currency is string && d.currency.size() == 3
+        && d.start is string && d.end is string && d.timezone is string && d.timezone.size() <= 100
+        && d.budget is int && d.budget >= 0 && d.budget <= 10000000000000
+        && d.me is string && d.defaultPayer is string && d.archived is bool && d.sample is bool
+        && d.people is list && d.people.size() >= 1 && d.people.size() <= 20
+        && d.activities is list && d.activities.size() <= 300
+        && d.plans is list && d.plans.size() <= 300
+        && d.expenses is list && d.expenses.size() <= 400
+        && d.tasks is list && d.tasks.size() <= 200
+        && d.settlements is list && d.settlements.size() == 0;
+    }
+    function validTrip(t, id) {
+      return t.keys().hasAll(['ownerId','editors','viewers','accounts','travelerIds','revision','data','updatedAt'])
+        && t.keys().hasOnly(['ownerId','editors','viewers','accounts','travelerIds','revision','data','updatedAt'])
+        && t.ownerId is string && t.editors is list && t.viewers is list
+        && t.editors.size() <= 20 && t.viewers.size() <= 20
+        && t.editors.toSet().size() == t.editors.size() && t.viewers.toSet().size() == t.viewers.size()
+        && !t.editors.hasAny(t.viewers) && !(t.ownerId in t.editors) && !(t.ownerId in t.viewers)
+        && t.accounts is map && t.accounts.size() <= 20
+        && t.travelerIds is list && t.travelerIds.size() == t.data.people.size()
+        && t.travelerIds.toSet().size() == t.travelerIds.size()
+        && t.accounts.keys().hasOnly(t.travelerIds)
+        && t.accounts.values().toSet().size() == t.accounts.size()
+        && t.accounts.get(t.data.me, '') == t.ownerId
+        && t.accounts.values().hasOnly(t.editors.concat(t.viewers).concat([t.ownerId]))
+        && t.revision is int && t.revision >= 1 && validData(t.data, id);
+    }
+    match /users/{userId}/trips/{id} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create, update: if signedIn() && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['name','tripId'])
+        && request.resource.data.tripId == id && request.resource.data.name is string
+        && request.resource.data.name.size() <= 120 && member(tripDoc(id));
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+    match /trips/{id} {
+      allow get: if member(resource.data);
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.revision == 1 && request.resource.data.editors.size() == 0
+        && request.resource.data.viewers.size() == 0 && validTrip(request.resource.data,id);
+      allow update: if validTrip(request.resource.data,id)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.revision == resource.data.revision + 1
+        && (owner(resource.data) || (editor(resource.data) && !resource.data.data.archived
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['data','revision','updatedAt'])
+          && request.resource.data.data.diff(resource.data.data).affectedKeys().hasOnly(['activities','plans','expenses','tasks'])));
+      allow delete: if false;
+      match /requests/{userId} {
+        allow create, update: if signedIn() && userId == request.auth.uid
+          && exists(/databases/$(database)/documents/trips/$(id))
+          && request.resource.data.keys().hasOnly(['name','email','createdAt'])
+          && request.resource.data.name is string && request.resource.data.name.size() <= 80
+          && request.resource.data.email == request.auth.token.email;
+        allow get: if signedIn() && (userId == request.auth.uid || owner(tripDoc(id)));
+        allow list: if owner(tripDoc(id));
+        allow delete: if signedIn() && (userId == request.auth.uid || owner(tripDoc(id)));
+      }
+      match /settlements/{settlementId} {
+        function validSettlement(s) {
+          let t = tripDoc(id);
+          return s.keys().hasAll(['id','from','to','baseAmount','date','note','status','reversed','createdBy','confirmedBy','confirmedAt'])
+            && s.keys().hasOnly(['id','from','to','baseAmount','date','note','status','reversed','createdBy','confirmedBy','confirmedAt'])
+            && s.id == settlementId && s.from is string && s.to is string && s.from != s.to
+            && s.from in t.travelerIds && s.to in t.travelerIds
+            && s.baseAmount is int && s.baseAmount > 0 && s.baseAmount <= 10000000000000
+            && s.date is string && s.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && s.note is string && s.note.size() <= 300 && s.reversed is bool;
+        }
+        function recipient(s) {
+          let t = tripDoc(id);
+          return signedIn() && (t.accounts.get(s.to,'') == request.auth.uid
+            || (t.accounts.get(s.to,'') == '' && owner(t)));
+        }
+        allow read: if member(tripDoc(id));
+        allow create: if editor(tripDoc(id)) && !tripDoc(id).data.archived
+          && validSettlement(request.resource.data)
+          && (tripDoc(id).accounts.get(request.resource.data.from,'') == request.auth.uid || owner(tripDoc(id)))
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.status == 'pending' && request.resource.data.reversed == false
+          && request.resource.data.confirmedBy == '' && request.resource.data.confirmedAt == null;
+        allow update: if editor(tripDoc(id)) && !tripDoc(id).data.archived && recipient(resource.data)
+          && validSettlement(request.resource.data) && !resource.data.reversed
+          && ((resource.data.status == 'pending' && request.resource.data.status == 'confirmed'
+            && request.resource.data.confirmedBy == request.auth.uid && request.resource.data.confirmedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','confirmedBy','confirmedAt']))
+          || (resource.data.status == 'confirmed' && request.resource.data.reversed == true
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reversed'])));
+        allow delete: if false;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
