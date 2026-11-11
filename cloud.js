@@ -22,7 +22,7 @@ export class Cloud {
   publish(){if(this.trip){const t=structuredClone(this.trip);t.settlements=this.receipts;try{validateTrip(t);this.onChange(t);}catch{this.onStatus('Shared data needs review · keep your last backup');}}else this.onChange();}
   async create(trip){
     if(!this.user)await this.signIn();
-    const data=structuredClone(validateTrip(trip));data.id=uid();data.sample=false;data.settlements=[];
+    const data=structuredClone(validateTrip(trip));data.id=uid();data.settlements=[];
     if(trip.settlements.length)throw Error('Choose a trip without existing repayments for its first cloud upload. Export your existing records before migrating.');
     const ref=this.f.doc(this.db,'trips',data.id);
     const accounts={[data.me]:this.user.uid};
