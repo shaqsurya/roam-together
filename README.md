@@ -6,7 +6,7 @@ A free web-based workspace for itineraries, locations, budgets, shared costs, up
 
 ## Use it
 
-Open the app and choose **Create your own adventure**, or explore the fictional sample trip. Today shows the next stops; Plan holds the itinerary and planned payments; Money shows each person's share and who pays whom; Trip holds friends, settings, checklists, and backups.
+Open the app and choose **New trip** in the top bar, or explore the fictional sample trip. The New trip button is available on every screen, including mobile. To switch existing trips, use **Trip → Switch adventure**. Today shows the next stops; Plan holds the itinerary and planned payments; Money shows each person's share and who pays whom; Trip holds friends, settings, checklists, and backups.
 
 Trips can stay on your device or use the connected free Firebase database. Choose **Invite friends → Share this trip live**, sign in with Google, and copy the invite link. Friends request access; approve them and link their traveler in **Trip**. Live changes sync for approved members. Export a JSON backup before clearing local browser data.
 
