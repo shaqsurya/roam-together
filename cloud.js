@@ -19,7 +19,7 @@ export class Cloud {
   get role(){if(!this.user||!this.meta)return null;return this.meta.ownerId===this.user.uid?'owner':this.meta.editors.includes(this.user.uid)?'editor':this.meta.viewers.includes(this.user.uid)?'viewer':null;}
   get traveler(){return Object.entries(this.meta?.accounts||{}).find(([,id])=>id===this.user?.uid)?.[0]||null;}
   get canEdit(){return ['owner','editor'].includes(this.role);}
-  publish(){if(this.trip){const t=structuredClone(this.trip);t.settlements=this.receipts;try{validateTrip(t);this.onChange(t);}catch{this.onStatus('Shared data needs review · keep your last backup');}}else this.onChange();}
+  publish(){if(this.trip){const t=structuredClone(this.trip);t.settlements=this.receipts;try{validateTrip(t);this.onChange(t);return true;}catch(e){console.warn('Roam shared-data validation:',e.message);this.onStatus('Shared data needs review: '+e.message);return false;}}this.onChange();return false;}
   async create(trip){
     if(!this.user)await this.signIn();
     const data=structuredClone(validateTrip(trip));data.id=uid();data.settlements=[];
@@ -38,13 +38,13 @@ export class Cloud {
     try{initial=await this.f.getDoc(ref);}catch{throw Error('You do not have access yet. Ask the trip owner to approve your request.');}
     if(!initial.exists())throw Error('Trip unavailable. Check the link with its owner.');
     this.stop();this.meta=initial.data();this.revision=this.meta.revision;this.trip=this.meta.data;this.trip.settlements=[];this.activeId=id;
-    this.unsub.push(this.f.onSnapshot(ref,s=>{
+    this.unsub.push(this.f.onSnapshot(ref,{includeMetadataChanges:true},s=>{
       if(!s.exists()){this.trip=null;this.onStatus('Trip unavailable');this.onChange();return;}
       const next=s.data();this.meta=next;this.revision=next.revision;this.trip=next.data;this.onStatus(s.metadata.fromCache?'Cached · reconnect to sync':'Live · saved to cloud');this.publish();
     },()=>{this.stop();this.trip=null;this.meta=null;this.onStatus('Access unavailable');this.onChange(null);}));
     this.unsub.push(this.f.onSnapshot(this.f.collection(ref,'settlements'),s=>{this.receipts=s.docs.map(d=>({...d.data(),id:d.id}));this.publish();},()=>this.onStatus('Repayments could not sync')));
     if(this.role==='owner')this.unsub.push(this.f.onSnapshot(this.f.collection(ref,'requests'),s=>{this.requests=s.docs.map(d=>({...d.data(),uid:d.id}));this.publish();}));
-    await this.index(id,this.trip.name);this.publish();
+    await this.index(id,this.trip.name);if(!this.publish())throw Error('The shared trip could not be displayed. Check the connection message before retrying.');
   }
   async save(trip,expectedRevision){
     if(!this.canEdit)throw Error('Only trip owners and editors can make changes.');

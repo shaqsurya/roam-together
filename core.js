@@ -98,7 +98,8 @@ export function validateTrip(t) {
   for(const e of t.expenses) {
     if(!text(e.id,100)||!text(e.title,160)||!e.title.trim()||!['expense','refund'].includes(e.kind)||!currencies.includes(e.currency)||!Number.isSafeInteger(e.amount)||e.amount<=0||!validDate(e.date)||!text(e.note)||!text(e.category,80)) throw Error('An expense contains invalid details.');
     if(convert(e.amount,e.currency,t.currency,e.rate)!==e.baseAmount||!map(e.shares,e.amount)||!map(e.payers,e.amount)||!map(e.baseShares,e.baseAmount)||!map(e.basePayers,e.baseAmount))throw Error('An expense has inconsistent amounts or shares.');
-    if(JSON.stringify(allocate(e.baseAmount,e.shares))!==JSON.stringify(e.baseShares)||JSON.stringify(allocate(e.baseAmount,e.payers))!==JSON.stringify(e.basePayers))throw Error('Converted expense shares do not match.');
+    const sameAmounts=(a,b)=>Object.keys(a).length===Object.keys(b).length&&Object.entries(a).every(([id,value])=>b[id]===value);
+    if(!sameAmounts(allocate(e.baseAmount,e.shares),e.baseShares)||!sameAmounts(allocate(e.baseAmount,e.payers),e.basePayers))throw Error('Converted expense shares do not match.');
     if(e.planId&&!t.plans.some(p=>p.id===e.planId)||e.activityId&&!t.activities.some(a=>a.id===e.activityId))throw Error('An expense refers to a missing activity or planned cost.');
     if(e.kind==='refund') { const original=t.expenses.find(x=>x.id===e.refundOf&&x.kind==='expense');if(!original)throw Error('A refund must link to the original expense.'); }
   }
