@@ -42,6 +42,27 @@ export function split(total, participants, mode='equal', values={}, currency='EU
   }
   return allocate(total,Object.fromEntries(participants.map(id=>[id,1])));
 }
+// Legacy records are classified without rewriting their amounts or participants.
+export function expenseScope(e) {
+  if(e.scope)return e.scope;
+  const beneficiaries=Object.keys(e.shares),payers=Object.keys(e.payers);
+  return beneficiaries.length===1&&payers.length===1&&beneficiaries[0]===payers[0]?'personal':'shared';
+}
+export function planScope(p) {return p.scope||(p.participants.length===1&&p.participants[0]===p.payer?'personal':'shared');}
+export function workspaceExpenses(trip,personId=null,section='personal') {
+  return trip.expenses.filter(e=>personId?(section==='shared'?expenseScope(e)==='shared'&&(personId in e.shares||personId in e.payers):expenseScope(e)==='personal'&&personId in e.shares):expenseScope(e)==='shared');
+}
+export function workspacePlans(trip,personId=null) {
+  return trip.plans.filter(p=>personId?(p.participants.includes(personId)||p.payer===personId):planScope(p)==='shared');
+}
+export function workspaceSummary(trip,personId=null) {
+  const sign=e=>e.kind==='refund'?-1:1;
+  const personalSpent=trip.expenses.filter(e=>expenseScope(e)==='personal').reduce((n,e)=>n+sign(e)*(personId?(e.baseShares[personId]||0):e.baseAmount),0);
+  const sharedCost=trip.expenses.filter(e=>expenseScope(e)==='shared').reduce((n,e)=>n+sign(e)*(personId?(e.baseShares[personId]||0):e.baseAmount),0);
+  let personalPlanned=0,sharedPlanned=0;
+  for(const p of trip.plans){const left=planProgress(trip,p).remaining;const amount=personId?(allocate(left,Object.fromEntries(p.participants.map(id=>[id,1])))[personId]||0):left;if(planScope(p)==='personal')personalPlanned+=amount;else sharedPlanned+=amount;}
+  return {personalSpent,sharedCost,personalPlanned,sharedPlanned,cost:personalSpent+sharedCost,forecast:personalSpent+sharedCost+personalPlanned+sharedPlanned,net:personId?balances(trip)[personId]?.net||0:0};
+}
 export function expenseFrom(form,trip) {
   const currency=form.currency||trip.currency, amount=minor(form.amount,currency);
   if(amount<=0) throw Error('The amount must be greater than zero.');
@@ -52,7 +73,7 @@ export function expenseFrom(form,trip) {
   if(Object.values(payers).some(x=>!Number.isSafeInteger(x)||x<0)||Object.values(payers).reduce((a,b)=>a+b,0)!==amount) throw Error('Upfront payments must add up to the total.');
   const rate=currency===trip.currency?1:Number(form.rate);
   const baseAmount=convert(amount,currency,trip.currency,rate);
-  return {id:form.id||uid(),title:form.title.trim(),category:form.category||'Other',date:form.date,currency,amount,rate,baseAmount,shares,payers,baseShares:allocate(baseAmount,shares),basePayers:allocate(baseAmount,payers),activityId:form.activityId||'',planId:form.planId||'',kind:form.kind||'expense',refundOf:form.refundOf||'',note:form.note||'',createdAt:new Date().toISOString()};
+  return {id:form.id||uid(),scope:personal?'personal':'shared',title:form.title.trim(),category:form.category||'Other',date:form.date,currency,amount,rate,baseAmount,shares,payers,baseShares:allocate(baseAmount,shares),basePayers:allocate(baseAmount,payers),activityId:form.activityId||'',planId:form.planId||'',kind:form.kind||'expense',refundOf:form.refundOf||'',note:form.note||'',createdAt:new Date().toISOString()};
 }
 export function balances(trip) {
   const rows=Object.fromEntries(trip.people.map(p=>[p.id,{id:p.id,name:p.name,paid:0,cost:0,sent:0,received:0,net:0}]));
@@ -98,6 +119,8 @@ export function validateTrip(t) {
   const sum=m=>Object.values(m).reduce((s,n)=>s+n,0);
   const map=(m,total)=>m&&typeof m==='object'&&!Array.isArray(m)&&Object.keys(m).length>0&&Object.keys(m).every(id=>ids.includes(id))&&Object.values(m).every(n=>Number.isSafeInteger(n)&&n>=0)&&sum(m)===total;
   for(const e of t.expenses) {
+    if(e.scope!==undefined&&!['personal','shared'].includes(e.scope))throw Error('Invalid expense workspace.');
+    if(e.scope==='personal'&&(Object.keys(e.shares).length!==1||Object.keys(e.payers).length!==1||Object.keys(e.shares)[0]!==Object.keys(e.payers)[0]))throw Error('A personal expense must belong to one traveler who paid it.');
     if(!text(e.id,100)||!text(e.title,160)||!e.title.trim()||!['expense','refund'].includes(e.kind)||!currencies.includes(e.currency)||!Number.isSafeInteger(e.amount)||e.amount<=0||!validDate(e.date)||!text(e.note)||!text(e.category,80)) throw Error('An expense contains invalid details.');
     if(convert(e.amount,e.currency,t.currency,e.rate)!==e.baseAmount||!map(e.shares,e.amount)||!map(e.payers,e.amount)||!map(e.baseShares,e.baseAmount)||!map(e.basePayers,e.baseAmount))throw Error('An expense has inconsistent amounts or shares.');
     const sameAmounts=(a,b)=>Object.keys(a).length===Object.keys(b).length&&Object.entries(a).every(([id,value])=>b[id]===value);
@@ -107,7 +130,7 @@ export function validateTrip(t) {
   }
   for(const e of t.expenses.filter(e=>e.kind==='expense')) {const refunds=t.expenses.filter(x=>x.kind==='refund'&&x.refundOf===e.id);if(refunds.some(r=>r.currency!==e.currency)||refunds.reduce((s,r)=>s+r.amount,0)>e.amount)throw Error('Refunds cannot exceed the original payment or change its currency.');}
   for(const s of t.settlements)if(!ids.includes(s.from)||!ids.includes(s.to)||s.from===s.to||!Number.isSafeInteger(s.baseAmount)||s.baseAmount<=0||!validDate(s.date)||!text(s.note,300)||!['pending','confirmed'].includes(s.status)||s.reversed!==undefined&&typeof s.reversed!=='boolean')throw Error('A repayment is invalid.');
-  for(const p of t.plans)if(!text(p.id,100)||!text(p.title,160)||!p.title.trim()||!Number.isSafeInteger(p.amount)||p.amount<0||!ids.includes(p.payer)||!Array.isArray(p.participants)||!p.participants.length||!p.participants.every(id=>ids.includes(id))||new Set(p.participants).size!==p.participants.length||p.due&&!validDate(p.due)||p.activityId&&!t.activities.some(a=>a.id===p.activityId))throw Error('A planned cost is invalid.');
+  for(const p of t.plans)if(p.scope!==undefined&&!['personal','shared'].includes(p.scope)||p.scope==='personal'&&(p.participants.length!==1||p.participants[0]!==p.payer)||!text(p.id,100)||!text(p.title,160)||!p.title.trim()||!Number.isSafeInteger(p.amount)||p.amount<0||!ids.includes(p.payer)||!Array.isArray(p.participants)||!p.participants.length||!p.participants.every(id=>ids.includes(id))||new Set(p.participants).size!==p.participants.length||p.due&&!validDate(p.due)||p.activityId&&!t.activities.some(a=>a.id===p.activityId))throw Error('A planned cost is invalid.');
   const time=v=>typeof v==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v);
   for(const a of t.activities)if(!text(a.id,100)||!text(a.title,160)||!a.title.trim()||!validDate(a.date)||a.date<t.start||a.date>t.end||!text(a.address,500)||!text(a.notes)||!Array.isArray(a.participants)||!a.participants.every(id=>ids.includes(id))||!time(a.time)||!time(a.endTime)||a.time>a.endTime||a.cancelBy&&!validDate(a.cancelBy)||a.bookingUrl&&!/^https?:\/\//.test(a.bookingUrl))throw Error('An activity is invalid.');
   for(const task of t.tasks)if(!text(task.id,100)||!text(task.title,160)||typeof task.done!=='boolean'||task.assignee&&!ids.includes(task.assignee))throw Error('A checklist task is invalid.');
