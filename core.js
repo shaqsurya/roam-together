@@ -1,3 +1,4 @@
+export function dateInZone(value=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone){const parts=new Intl.DateTimeFormat('en',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(value);const part=key=>parts.find(p=>p.type===key).value;return part('year')+'-'+part('month')+'-'+part('day');}
 export const uid = () => globalThis.crypto.randomUUID();
 export const currencies = ['EUR','USD','GBP','HUF','IDR','JPY','CHF','CZK','PLN','THB','SGD','AUD','CAD','KRW','KWD'];
 export function precision(currency) { return new Intl.NumberFormat('en', { style:'currency', currency }).resolvedOptions().maximumFractionDigits; }
@@ -71,9 +72,13 @@ export function expenseFrom(form,trip) {
   const shares=personal?{[form.personalPerson]:amount}:split(amount,form.participants,form.mode,form.values,currency);
   const payers=personal?{[form.personalPerson]:amount}:form.payers||{[form.payer]:amount};
   if(Object.values(payers).some(x=>!Number.isSafeInteger(x)||x<0)||Object.values(payers).reduce((a,b)=>a+b,0)!==amount) throw Error('Upfront payments must add up to the total.');
+  const linkedPlan=form.planId?trip.plans.find(p=>p.id===form.planId):null;
+  if(form.planId&&!linkedPlan)throw Error('Choose an existing planned cost.');
+  if(linkedPlan&&(planScope(linkedPlan)!==(personal?'personal':'shared')||personal&&linkedPlan.payer!==form.personalPerson))throw Error('Choose a planned cost from the same joint or personal workspace.');
+  if(linkedPlan?.activityId&&form.activityId&&linkedPlan.activityId!==form.activityId)throw Error('Choose the itinerary activity linked to this planned cost.');
   const rate=currency===trip.currency?1:Number(form.rate);
   const baseAmount=convert(amount,currency,trip.currency,rate);
-  return {id:form.id||uid(),scope:personal?'personal':'shared',title:form.title.trim(),category:form.category||'Other',date:form.date,currency,amount,rate,baseAmount,shares,payers,baseShares:allocate(baseAmount,shares),basePayers:allocate(baseAmount,payers),activityId:form.activityId||'',planId:form.planId||'',kind:form.kind||'expense',refundOf:form.refundOf||'',note:form.note||'',createdAt:new Date().toISOString()};
+  return {id:form.id||uid(),scope:personal?'personal':'shared',title:form.title.trim(),category:form.category||'Other',date:form.date,currency,amount,rate,baseAmount,shares,payers,baseShares:allocate(baseAmount,shares),basePayers:allocate(baseAmount,payers),activityId:form.activityId||linkedPlan?.activityId||'',planId:form.planId||'',kind:form.kind||'expense',refundOf:form.refundOf||'',note:form.note||'',createdAt:new Date().toISOString()};
 }
 export function balances(trip) {
   const rows=Object.fromEntries(trip.people.map(p=>[p.id,{id:p.id,name:p.name,paid:0,cost:0,sent:0,received:0,net:0}]));
@@ -83,7 +88,7 @@ export function balances(trip) {
     for(const [id,amount] of Object.entries(e.baseShares)) { if(!rows[id]) throw Error('Unknown participant.'); rows[id].cost+=amount*sign; }
   }
   for(const s of trip.settlements.filter(s=>s.status==='confirmed'&&!s.reversed)) { rows[s.from].sent+=s.baseAmount;rows[s.to].received+=s.baseAmount; }
-  for(const r of Object.values(rows)) r.net=r.paid-r.cost+r.sent-r.received;
+  for(const r of Object.values(rows)){r.net=r.paid-r.cost+r.sent-r.received;if(![r.paid,r.cost,r.sent,r.received,r.net].every(Number.isSafeInteger))throw Error('Trip totals exceed the supported amount. Split the records into separate trips.');}
   return rows;
 }
 export function transfers(trip) {
@@ -120,7 +125,7 @@ export function validateTrip(t) {
   const map=(m,total)=>m&&typeof m==='object'&&!Array.isArray(m)&&Object.keys(m).length>0&&Object.keys(m).every(id=>ids.includes(id))&&Object.values(m).every(n=>Number.isSafeInteger(n)&&n>=0)&&sum(m)===total;
   for(const e of t.expenses) {
     if(e.scope!==undefined&&!['personal','shared'].includes(e.scope))throw Error('Invalid expense workspace.');
-    if(e.scope==='personal'&&(Object.keys(e.shares).length!==1||Object.keys(e.payers).length!==1||Object.keys(e.shares)[0]!==Object.keys(e.payers)[0]))throw Error('A personal expense must belong to one traveler who paid it.');
+    if(e.scope==='personal'&&(!e.shares||!e.payers||Object.keys(e.shares).length!==1||Object.keys(e.payers).length!==1||Object.keys(e.shares)[0]!==Object.keys(e.payers)[0]))throw Error('A personal expense must belong to one traveler who paid it.');
     if(!text(e.id,100)||!text(e.title,160)||!e.title.trim()||!['expense','refund'].includes(e.kind)||!currencies.includes(e.currency)||!Number.isSafeInteger(e.amount)||e.amount<=0||!validDate(e.date)||!text(e.note)||!text(e.category,80)) throw Error('An expense contains invalid details.');
     if(convert(e.amount,e.currency,t.currency,e.rate)!==e.baseAmount||!map(e.shares,e.amount)||!map(e.payers,e.amount)||!map(e.baseShares,e.baseAmount)||!map(e.basePayers,e.baseAmount))throw Error('An expense has inconsistent amounts or shares.');
     const sameAmounts=(a,b)=>Object.keys(a).length===Object.keys(b).length&&Object.entries(a).every(([id,value])=>b[id]===value);
@@ -132,8 +137,8 @@ export function validateTrip(t) {
   for(const s of t.settlements)if(!ids.includes(s.from)||!ids.includes(s.to)||s.from===s.to||!Number.isSafeInteger(s.baseAmount)||s.baseAmount<=0||!validDate(s.date)||!text(s.note,300)||!['pending','confirmed'].includes(s.status)||s.reversed!==undefined&&typeof s.reversed!=='boolean')throw Error('A repayment is invalid.');
   for(const p of t.plans)if(p.scope!==undefined&&!['personal','shared'].includes(p.scope)||p.scope==='personal'&&(p.participants.length!==1||p.participants[0]!==p.payer)||!text(p.id,100)||!text(p.title,160)||!p.title.trim()||!Number.isSafeInteger(p.amount)||p.amount<0||!ids.includes(p.payer)||!Array.isArray(p.participants)||!p.participants.length||!p.participants.every(id=>ids.includes(id))||new Set(p.participants).size!==p.participants.length||p.due&&!validDate(p.due)||p.activityId&&!t.activities.some(a=>a.id===p.activityId))throw Error('A planned cost is invalid.');
   const time=v=>typeof v==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v);
-  for(const a of t.activities)if(!text(a.id,100)||!text(a.title,160)||!a.title.trim()||!validDate(a.date)||a.date<t.start||a.date>t.end||!text(a.address,500)||!text(a.notes)||!Array.isArray(a.participants)||!a.participants.every(id=>ids.includes(id))||!time(a.time)||!time(a.endTime)||a.time>a.endTime||a.cancelBy&&!validDate(a.cancelBy)||a.bookingUrl&&!/^https?:\/\//.test(a.bookingUrl))throw Error('An activity is invalid.');
-  for(const task of t.tasks)if(!text(task.id,100)||!text(task.title,160)||typeof task.done!=='boolean'||task.assignee&&!ids.includes(task.assignee))throw Error('A checklist task is invalid.');
+  for(const a of t.activities)if(!text(a.id,100)||!text(a.title,160)||!a.title.trim()||!validDate(a.date)||a.date<t.start||a.date>t.end||!text(a.address,500)||!text(a.notes)||!Array.isArray(a.participants)||!a.participants.length||!a.participants.every(id=>ids.includes(id))||!time(a.time)||!time(a.endTime)||a.time>a.endTime||a.cancelBy&&!validDate(a.cancelBy)||a.bookingUrl&&!/^https?:\/\//.test(a.bookingUrl))throw Error('An activity is invalid.');
+  for(const task of t.tasks)if(!text(task.id,100)||!text(task.title,160)||!task.title.trim()||typeof task.done!=='boolean'||task.assignee&&!ids.includes(task.assignee))throw Error('A checklist task is invalid.');
   if(Math.abs(Object.values(balances(t)).reduce((s,p)=>s+p.net,0))!==0)throw Error('The trip balances do not reconcile.');
   if(JSON.stringify(t).length>600000)throw Error('This trip is too large. Export it and start another trip.');
   return t;
@@ -146,7 +151,7 @@ export function csv(trip) {
   return '\uFEFF'+[header,...trip.expenses.map(e=>[e.date,e.title,e.kind,e.category,e.currency,major(e.amount,e.currency),e.rate,trip.currency,major(e.baseAmount,trip.currency),Object.entries(e.payers).map(([id,v])=>name(id)+': '+major(v,e.currency)).join('; '),Object.entries(e.shares).map(([id,v])=>name(id)+': '+major(v,e.currency)).join('; '),e.note])].map(row=>row.map(csvCell).join(',')).join('\r\n');
 }
 export function newTrip({name,destination,start,end,currency='EUR',budget=0,person='You'}) {
-  const me=uid();return {id:uid(),name,destination,start,end,currency,budget:minor(budget,currency),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,people:[{id:me,name:person}],me,defaultPayer:me,activities:[],plans:[],expenses:[],settlements:[],tasks:[],archived:false,sample:false};
+  const me=uid();return {id:uid(),name:name.trim(),destination:destination.trim(),start,end,currency,budget:minor(budget,currency),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,people:[{id:me,name:person.trim()}],me,defaultPayer:me,activities:[],plans:[],expenses:[],settlements:[],tasks:[],archived:false,sample:false};
 }
 export function sampleTrip() {
   const t={id:'sample-vienna',name:'Vienna, together.',destination:'Vienna, Austria',start:'2026-12-12',end:'2026-12-14',currency:'EUR',budget:90000,timezone:'Europe/Vienna',people:[{id:'you',name:'You'},{id:'ben',name:'Ben'},{id:'cara',name:'Cara'}],me:'you',defaultPayer:'you',sample:true,archived:false,activities:[],plans:[],expenses:[],settlements:[],tasks:[]};

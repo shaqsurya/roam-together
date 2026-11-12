@@ -33,3 +33,9 @@
 @media print{.workspace-bar{display:none!important}.crew-grid{display:block}.crew-space{break-inside:avoid}}
 .money-grid>*,.dashboard-grid>*,.plan-layout>*,.trip-grid>*{min-width:0}.section-top>div{min-width:0}.money-grid .section-top{flex-wrap:wrap}.table-wrap{max-width:100%}
 .workspace-bar p>.btn{min-height:24px;padding:0;margin-top:6px;font-size:11px}
+/* One consistent trip selector on every screen. */
+.trip-navigation{display:flex;align-items:center;gap:12px;margin-bottom:16px;min-width:0}.trip-navigation>label{font-size:12px;font-weight:700;color:var(--muted)}.trip-navigation>select{min-width:0;flex:1;max-width:420px;padding:11px 32px 11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);font-size:13px;font-weight:600}.trip-navigation>.btn{font-size:11px;margin-left:auto}.recovery-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:20px}.stat-value{overflow-wrap:anywhere}.workspace-label{margin-top:36px}.nav{margin-top:20px}
+@media(max-width:600px){.trip-navigation{gap:8px}.trip-navigation>select{font-size:16px;max-width:none}.trip-navigation>.btn{font-size:10px;min-width:57px}.nav{margin-top:0}}
+@media print{.trip-navigation{display:none!important}}
+
+.content h1,.content h2,.content h3,.content p,dialog p{overflow-wrap:anywhere}.person-summary>div{min-width:0}

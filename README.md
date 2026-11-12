@@ -6,13 +6,13 @@ A free web-based workspace for itineraries, locations, budgets, shared costs, up
 
 ## Use it
 
-Open the app and choose **New trip** in the top bar, or explore the fictional sample trip. The New trip button is available on every screen, including mobile. To switch existing trips, use **Trip & friends → Switch adventure**. Overview provides shortcuts for friends, budget, activities, and expenses. Itinerary holds your stops and planned payments. Budget & costs shows the spending forecast, each person's share, and who pays whom. Trip & friends holds travelers, settings, checklists, and backups.
+Open the app and choose **New trip** in the top bar, or explore the fictional sample trip. The New trip button is available on every screen, including mobile. Use the **Trip** selector above any page to switch between cloud, device, and sample trips. Previously opened shared trips remain selectable after switching away or reloading. Overview provides shortcuts for friends, budget, activities, and expenses. Itinerary holds your stops and planned payments. Budget & costs shows the spending forecast, each person's share, and who pays whom. Trip & friends holds travelers, settings, checklists, and backups.
 
 Trips can stay on your device or use the connected free Firebase database. Choose **Invite friends → Save to cloud & get link**. The creator signs in with Google once. Anyone holding the trip link can open and edit it immediately, without guest sign-in or approval. On an older trip, the owner selects **Invite friends → Enable link sharing** once; the existing link then works immediately. Export a JSON backup before clearing local browser data.
 
 ## Joint trip and personal spaces
 
-Use the workspace switch above every page to select **Joint trip (Master)** or a friend’s **Personal space**. Choose **Add friend** beside the switch at any time, including after the trip has started. Enter their name and save; their personal space appears automatically in the same trip. Use **Edit name** in a personal space to rename that traveler. Adding a friend never changes past payment shares.
+Use the workspace switch below the Trip selector to select **Joint trip (Master)** or a friend’s **Personal space**. Choose **Add friend** beside the switch at any time, including after the trip has started. Enter their name and save; their personal space appears automatically in the same trip. Use **Edit name** in a personal space to rename that traveler. Adding a friend never changes past payment shares.
 
 The master ledger holds joint expenses and shared plans. Each personal space shows individual purchases, that person’s group shares, repayments, and upcoming costs. Personal purchases and plans can link to activities in the same shared itinerary. Spaces are named ledgers within the same shared trip and remain accessible to everyone holding its link.
 
@@ -42,6 +42,10 @@ Free quotas apply to the whole Firebase project. If a quota is reached, service 
 
 The files at this repository's root are the ready-to-serve website. GitHub Pages publishes `main` → `/ (root)`.
 
-[Download the complete developer project](./roam-together-source.zip) for the test suites, deployment workflow, detailed setup guide, and local development server. It includes 38 calculation/import/export tests and 28 Firestore access-rule tests.
+[Download the complete developer project](./roam-together-source.zip) for the test suites, deployment workflow, detailed setup guide, and local development server. It includes 69 application tests and 28 Firestore access-rule tests.
 
 For a simple app update, replace the matching root website files from the developer project's `dist/` folder. For a full-source GitHub Actions deployment, extract the developer project into a separate repository and follow its README.
+
+## Reliability review
+
+The [review report](./AUDIT.md) lists fixes, automated checks, browser checks, and current operating boundaries. Shared-trip references persist separately from the active trip. Slow loads cannot replace a newer selection. New device trips and imports clear the old cloud URL. Both cloud and device forms reject stale saves and retain downloadable drafts. The overview and navigation have been simplified.
