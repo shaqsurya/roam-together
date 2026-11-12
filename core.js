@@ -45,8 +45,10 @@ export function split(total, participants, mode='equal', values={}, currency='EU
 export function expenseFrom(form,trip) {
   const currency=form.currency||trip.currency, amount=minor(form.amount,currency);
   if(amount<=0) throw Error('The amount must be greater than zero.');
-  const shares=split(amount,form.participants,form.mode,form.values,currency);
-  const payers=form.payers||{[form.payer]:amount};
+  const personal=form.scope==='personal';
+  if(personal&&!trip.people.some(p=>p.id===form.personalPerson))throw Error('Choose the traveler for this personal expense.');
+  const shares=personal?{[form.personalPerson]:amount}:split(amount,form.participants,form.mode,form.values,currency);
+  const payers=personal?{[form.personalPerson]:amount}:form.payers||{[form.payer]:amount};
   if(Object.values(payers).some(x=>!Number.isSafeInteger(x)||x<0)||Object.values(payers).reduce((a,b)=>a+b,0)!==amount) throw Error('Upfront payments must add up to the total.');
   const rate=currency===trip.currency?1:Number(form.rate);
   const baseAmount=convert(amount,currency,trip.currency,rate);

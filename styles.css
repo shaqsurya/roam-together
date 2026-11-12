@@ -22,3 +22,6 @@
 @media(max-width:1150px){.quick-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.page-heading{flex-wrap:wrap}.quick-grid{gap:10px}.quick-step{padding:13px 10px;gap:8px}.quick-step>.icon{display:none}.quick-step small{font-size:10px}.budget-guide .section-top{align-items:flex-start;flex-wrap:wrap}.budget-breakdown{gap:12px;justify-content:space-between}.budget-breakdown strong{font-size:17px}.budget-breakdown span{font-size:10px}.money-help{grid-template-columns:1fr;gap:18px}.nav button{padding-left:4px;padding-right:4px;font-size:9px}.budget-stat .stat-value{font-size:21px}}
 @media print{.quick-start,.money-help{display:none}}
+
+#shared-controls,#multiple-controls{border:0;margin:0;padding:0;min-width:0}.expense-scope-help{margin:-6px 0 18px}
+.link-view{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}

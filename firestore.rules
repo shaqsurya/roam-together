@@ -6,6 +6,9 @@ service cloud.firestore {
     function owner(t) { return signedIn() && t.ownerId == request.auth.uid; }
     function member(t) { return signedIn() && (owner(t) || request.auth.uid in t.editors || request.auth.uid in t.viewers); }
     function editor(t) { return owner(t) || (signedIn() && request.auth.uid in t.editors); }
+    function linkAccess(t) { return t.get('linkAccess',false) == true; }
+    function canEdit(t) { return linkAccess(t) || editor(t); }
+    function actor() { return signedIn() ? request.auth.uid : 'link-guest'; }
     function validData(d, id) {
       return d is map && d.keys().hasAll(['id','name','destination','start','end','currency','budget','timezone','people','me','defaultPayer','activities','plans','expenses','settlements','tasks','archived','sample'])
         && d.keys().hasOnly(['id','name','destination','start','end','currency','budget','timezone','people','me','defaultPayer','activities','plans','expenses','settlements','tasks','archived','sample'])
@@ -23,7 +26,8 @@ service cloud.firestore {
     }
     function validTrip(t, id) {
       return t.keys().hasAll(['ownerId','editors','viewers','accounts','travelerIds','revision','data','updatedAt'])
-        && t.keys().hasOnly(['ownerId','editors','viewers','accounts','travelerIds','revision','data','updatedAt'])
+        && t.keys().hasOnly(['ownerId','editors','viewers','accounts','travelerIds','revision','data','updatedAt','linkAccess'])
+        && t.get('linkAccess',false) is bool
         && t.ownerId is string && t.editors is list && t.viewers is list
         && t.editors.size() <= 20 && t.viewers.size() <= 20
         && t.editors.toSet().size() == t.editors.size() && t.viewers.toSet().size() == t.viewers.size()
@@ -42,19 +46,22 @@ service cloud.firestore {
       allow create, update: if signedIn() && request.auth.uid == userId
         && request.resource.data.keys().hasOnly(['name','tripId'])
         && request.resource.data.tripId == id && request.resource.data.name is string
-        && request.resource.data.name.size() <= 120 && member(tripDoc(id));
+        && request.resource.data.name.size() <= 120 && (member(tripDoc(id)) || linkAccess(tripDoc(id)));
       allow delete: if signedIn() && request.auth.uid == userId;
     }
     match /trips/{id} {
-      allow get: if member(resource.data);
+      allow get: if member(resource.data) || linkAccess(resource.data);
       allow list: if false;
       allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.revision == 1 && request.resource.data.editors.size() == 0
-        && request.resource.data.viewers.size() == 0 && validTrip(request.resource.data,id);
+        && request.resource.data.viewers.size() == 0 && id.matches('^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$') && validTrip(request.resource.data,id);
       allow update: if validTrip(request.resource.data,id)
         && request.resource.data.ownerId == resource.data.ownerId
         && request.resource.data.revision == resource.data.revision + 1
-        && (owner(resource.data) || (editor(resource.data) && !resource.data.data.archived
+        && (owner(resource.data) || (linkAccess(resource.data) && !resource.data.data.archived
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['data','travelerIds','revision','updatedAt'])
+          && request.resource.data.data.archived == resource.data.data.archived
+          && request.resource.data.data.me == resource.data.data.me) || (editor(resource.data) && !resource.data.data.archived
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['data','revision','updatedAt'])
           && request.resource.data.data.diff(resource.data.data).affectedKeys().hasOnly(['activities','plans','expenses','tasks'])));
       allow delete: if false;
@@ -84,17 +91,17 @@ service cloud.firestore {
           return signedIn() && (t.accounts.get(s.to,'') == request.auth.uid
             || (t.accounts.get(s.to,'') == '' && owner(t)));
         }
-        allow read: if member(tripDoc(id));
-        allow create: if editor(tripDoc(id)) && !tripDoc(id).data.archived
+        allow read: if member(tripDoc(id)) || linkAccess(tripDoc(id));
+        allow create: if canEdit(tripDoc(id)) && !tripDoc(id).data.archived
           && validSettlement(request.resource.data)
-          && (tripDoc(id).accounts.get(request.resource.data.from,'') == request.auth.uid || owner(tripDoc(id)))
-          && request.resource.data.createdBy == request.auth.uid
+          && (linkAccess(tripDoc(id)) || tripDoc(id).accounts.get(request.resource.data.from,'') == actor() || owner(tripDoc(id)))
+          && request.resource.data.createdBy == actor()
           && request.resource.data.status == 'pending' && request.resource.data.reversed == false
           && request.resource.data.confirmedBy == '' && request.resource.data.confirmedAt == null;
-        allow update: if editor(tripDoc(id)) && !tripDoc(id).data.archived && recipient(resource.data)
+        allow update: if canEdit(tripDoc(id)) && !tripDoc(id).data.archived && (linkAccess(tripDoc(id)) || recipient(resource.data))
           && validSettlement(request.resource.data) && !resource.data.reversed
           && ((resource.data.status == 'pending' && request.resource.data.status == 'confirmed'
-            && request.resource.data.confirmedBy == request.auth.uid && request.resource.data.confirmedAt == request.time
+            && request.resource.data.confirmedBy == actor() && request.resource.data.confirmedAt == request.time
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','confirmedBy','confirmedAt']))
           || (resource.data.status == 'confirmed' && request.resource.data.reversed == true
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reversed'])));
